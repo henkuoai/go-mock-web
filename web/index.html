@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>go-mock-web · Mock 接口管理</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen" x-data="app()" x-init="load()">
+
+  <!-- 顶栏 -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-10">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center gap-4">
+      <h1 class="text-lg font-bold text-slate-900 flex items-center gap-2">
+        <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+        go-mock-web
+      </h1>
+      <div class="flex-1"></div>
+      <input
+        type="text"
+        x-model="query"
+        @input.debounce.300ms="load()"
+        placeholder="搜索名称 / 路径 / 描述…"
+        class="px-3 py-1.5 text-sm border border-slate-300 rounded-md focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400 outline-none w-64" />
+      <select x-model="methodFilter" @change="load()" class="px-3 py-1.5 text-sm border border-slate-300 rounded-md bg-white outline-none">
+        <option value="">全部方法</option>
+        <template x-for="m in methods" :key="m">
+          <option :value="m" x-text="m"></option>
+        </template>
+      </select>
+      <button @click="openImport()"
+        class="px-3 py-1.5 text-sm font-medium border border-slate-300 bg-white rounded-md hover:bg-slate-50 transition">
+        导入 curl
+      </button>
+      <button @click="openCreate()"
+        class="px-4 py-1.5 text-sm font-medium bg-emerald-600 text-white rounded-md hover:bg-emerald-700 transition">
+        + 新建接口
+      </button>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 py-6">
+
+    <!-- 空状态 -->
+    <div x-show="!loading && list.length === 0" class="text-center py-24 text-slate-400">
+      <p class="text-base">还没有 mock 接口</p>
+      <p class="text-sm mt-1">点击右上角「新建接口」开始</p>
+    </div>
+
+    <!-- 列表 -->
+    <div x-show="list.length > 0" class="bg-white rounded-lg border border-slate-200 overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-50 text-slate-500 text-xs uppercase">
+          <tr>
+            <th class="text-left px-4 py-3 font-medium">名称</th>
+            <th class="text-left px-4 py-3 font-medium">方法</th>
+            <th class="text-left px-4 py-3 font-medium">路径</th>
+            <th class="text-left px-4 py-3 font-medium">状态</th>
+            <th class="text-left px-4 py-3 font-medium">延迟</th>
+            <th class="text-left px-4 py-3 font-medium">启用</th>
+            <th class="text-right px-4 py-3 font-medium">操作</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          <template x-for="item in list" :key="item.id">
+            <tr class="hover:bg-slate-50">
+              <td class="px-4 py-3">
+                <div class="font-medium text-slate-900" x-text="item.name"></div>
+                <div class="text-xs text-slate-400 mt-0.5" x-text="item.description || '—'"></div>
+              </td>
+              <td class="px-4 py-3">
+                <span class="inline-block px-2 py-0.5 text-xs font-semibold rounded mono"
+                  :class="methodClass(item.method)" x-text="item.method"></span>
+              </td>
+              <td class="px-4 py-3 mono text-slate-700" x-text="item.path"></td>
+              <td class="px-4 py-3">
+                <span class="mono text-slate-600" x-text="item.status || 200"></span>
+              </td>
+              <td class="px-4 py-3 text-slate-500" x-text="item.delay ? item.delay + 'ms' : '—'"></td>
+              <td class="px-4 py-3">
+                <button @click="toggleEnabled(item)"
+                  class="relative inline-flex h-5 w-9 items-center rounded-full transition"
+                  :class="item.enabled ? 'bg-emerald-500' : 'bg-slate-300'">
+                  <span class="inline-block h-4 w-4 transform rounded-full bg-white transition"
+                    :class="item.enabled ? 'translate-x-4' : 'translate-x-1'"></span>
+                </button>
+              </td>
+              <td class="px-4 py-3 text-right space-x-2 whitespace-nowrap">
+                <button @click="openTest(item)"
+                  class="px-2.5 py-1 text-xs rounded border border-slate-300 hover:bg-slate-100">测试</button>
+                <button @click="openExport(item)"
+                  class="px-2.5 py-1 text-xs rounded border border-slate-300 hover:bg-slate-100">curl</button>
+                <button @click="openEdit(item)"
+                  class="px-2.5 py-1 text-xs rounded border border-slate-300 hover:bg-slate-100">编辑</button>
+                <button @click="remove(item)"
+                  class="px-2.5 py-1 text-xs rounded border border-red-300 text-red-600 hover:bg-red-50">删除</button>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </main>
+
+  <!-- 编辑/新建 弹窗 -->
+  <div x-show="modalOpen" x-cloak class="fixed inset-0 z-20 flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/40" @click="closeModal()"></div>
+    <div class="relative bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+         @keydown.escape.window="closeModal()">
+      <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white">
+        <h2 class="font-bold text-slate-900" x-text="form.id ? '编辑接口' : '新建接口'"></h2>
+        <button @click="closeModal()" class="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+      </div>
+
+      <div class="px-6 py-5 space-y-4">
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1">名称 <span class="text-red-500">*</span></label>
+            <input x-model="form.name" type="text"
+              class="w-full px-3 py-2 text-sm border border-slate-300 rounded-md outline-none focus:ring-2 focus:ring-emerald-400" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1">描述</label>
+            <input x-model="form.description" type="text"
+              class="w-full px-3 py-2 text-sm border border-slate-300 rounded-md outline-none focus:ring-2 focus:ring-emerald-400" />
+          </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1">方法 <span class="text-red-500">*</span></label>
+            <select x-model="form.method"
+              class="w-full px-3 py-2 text-sm border border-slate-300 rounded-md bg-white outline-none focus:ring-2 focus:ring-emerald-400">
+              <template x-for="m in methods" :key="m">
+                <option :value="m" x-text="m"></option>
+              </template>
+            </select>
+          </div>
+          <div class="col-span-2">
+            <label class="block text-sm font-medium text-slate-700 mb-1">路径 <span class="text-red-500">*</span></label>
+            <input x-model="form.path" type="text" placeholder="/users/:id"
+              class="w-full px-3 py-2 text-sm border border-slate-300 rounded-md mono outline-none focus:ring-2 focus:ring-emerald-400" />
+            <p class="text-xs text-slate-400 mt-1">支持 <code class="mono">:param</code> 路径参数与 <code class="mono">*</code> 通配</p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1">状态码</label>
+            <input x-model.number="form.status" type="number"
+              class="w-full px-3 py-2 text-sm border border-slate-300 rounded-md outline-none focus:ring-2 focus:ring-emerald-400" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1">延迟 (ms)</label>
+            <input x-model.number="form.delay" type="number" min="0"
+              class="w-full px-3 py-2 text-sm border border-slate-300 rounded-md outline-none focus:ring-2 focus:ring-emerald-400" />
+          </div>
+          <div class="flex items-end pb-2">
+            <label class="inline-flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+              <input x-model="form.enabled" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-400" />
+              启用
+            </label>
+          </div>
+        </div>
+
+        <!-- 响应头 -->
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="block text-sm font-medium text-slate-700">响应头</label>
+            <button @click="form.headers.push({key:'', value:''})"
+              class="text-xs text-emerald-600 hover:underline">+ 添加</button>
+          </div>
+          <div class="space-y-2">
+            <template x-for="(h, i) in form.headers" :key="i">
+              <div class="flex gap-2">
+                <input x-model="h.key" placeholder="Header-Name"
+                  class="flex-1 px-2 py-1.5 text-sm border border-slate-300 rounded mono outline-none focus:ring-2 focus:ring-emerald-400" />
+                <input x-model="h.value" placeholder="value"
+                  class="flex-1 px-2 py-1.5 text-sm border border-slate-300 rounded mono outline-none focus:ring-2 focus:ring-emerald-400" />
+                <button @click="form.headers.splice(i,1)"
+                  class="px-2 text-slate-400 hover:text-red-600">&times;</button>
+              </div>
+            </template>
+            <p x-show="form.headers.length === 0" class="text-xs text-slate-400">未设置则默认 Content-Type: application/json</p>
+          </div>
+        </div>
+
+        <!-- 响应体 -->
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="block text-sm font-medium text-slate-700">响应体（支持模板）</label>
+            <button @click="helpOpen = !helpOpen"
+              class="text-xs text-emerald-600 hover:underline" x-text="helpOpen ? '收起帮助' : '模板语法帮助'"></button>
+          </div>
+          <textarea x-model="form.body" rows="8"
+            class="w-full px-3 py-2 text-sm border border-slate-300 rounded-md mono outline-none focus:ring-2 focus:ring-emerald-400"
+            placeholder='{"id":"{{.Path.id}}","name":"{{.Body.name}}"}'></textarea>
+
+          <div x-show="helpOpen" x-cloak class="mt-2 p-3 bg-slate-50 border border-slate-200 rounded text-xs text-slate-600 space-y-1">
+            <p><code class="mono text-emerald-700">{{.Method}}</code> — 请求方法</p>
+            <p><code class="mono text-emerald-700">{{.Path.id}}</code> — 路径参数（来自 <code class="mono">:id</code>）</p>
+            <p><code class="mono text-emerald-700">{{.Query.page}}</code> — 查询参数</p>
+            <p><code class="mono text-emerald-700">{{.Body.name}}</code> / <code class="mono text-emerald-700">{{.Body.user.id}}</code> — 请求体 JSON 字段</p>
+            <p><code class="mono text-emerald-700">{{.Form.field}}</code> — 表单字段</p>
+            <p><code class="mono text-emerald-700">{{.RawBody}}</code> — 原始请求体</p>
+            <p><code class="mono text-emerald-700">{{index .Header "X-Token"}}</code> — 请求头（键含特殊字符用 index）</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="px-6 py-4 border-t border-slate-200 flex justify-end gap-2 sticky bottom-0 bg-white">
+        <button @click="closeModal()"
+          class="px-4 py-2 text-sm rounded-md border border-slate-300 hover:bg-slate-50">取消</button>
+        <button @click="save()"
+          class="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-md hover:bg-emerald-700">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 测试弹窗 -->
+  <div x-show="testOpen" x-cloak class="fixed inset-0 z-20 flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/40" @click="testOpen=false"></div>
+    <div class="relative bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+         @keydown.escape.window="testOpen=false">
+      <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white">
+        <h2 class="font-bold text-slate-900">测试接口 — <span class="mono" x-text="testItem?.name"></span></h2>
+        <button @click="testOpen=false" class="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+      </div>
+      <div class="px-6 py-5 space-y-4">
+        <div class="flex gap-2">
+          <span class="mono text-xs px-2 py-1.5 rounded font-semibold" :class="testItem ? methodClass(testItem.method) : ''"
+            x-text="testItem?.method"></span>
+          <input x-model="testPath" type="text"
+            class="flex-1 px-3 py-1.5 text-sm border border-slate-300 rounded-md mono outline-none focus:ring-2 focus:ring-emerald-400" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">请求体（可选）</label>
+          <textarea x-model="testBody" rows="4"
+            class="w-full px-3 py-2 text-sm border border-slate-300 rounded-md mono outline-none focus:ring-2 focus:ring-emerald-400"
+            placeholder='{"name":"alice"}'></textarea>
+        </div>
+        <button @click="runTest()"
+          class="px-4 py-2 text-sm font-medium text-white bg-slate-800 rounded-md hover:bg-slate-900">发送请求</button>
+
+        <div x-show="testResult" class="space-y-2">
+          <div class="text-sm">
+            <span class="text-slate-500">状态码：</span>
+            <span class="mono font-semibold" :class="testStatusClass()" x-text="testStatus"></span>
+          </div>
+          <pre class="bg-slate-900 text-slate-100 p-3 rounded text-xs overflow-auto max-h-80 mono" x-text="testResult"></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 导入 curl 弹窗 -->
+  <div x-show="importOpen" x-cloak class="fixed inset-0 z-20 flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/40" @click="closeImport()"></div>
+    <div class="relative bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+         @keydown.escape.window="closeImport()">
+      <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white">
+        <h2 class="font-bold text-slate-900">导入 curl</h2>
+        <button @click="closeImport()" class="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+      </div>
+      <div class="px-6 py-5 space-y-3">
+        <p class="text-xs text-slate-500">粘贴 curl 命令，自动解析方法与路径并填入新建表单。支持 <code class="mono">-X</code>、<code class="mono">-H</code>、<code class="mono">-d</code> 与续行。</p>
+        <textarea x-model="importText" rows="10"
+          class="w-full px-3 py-2 text-sm border border-slate-300 rounded-md mono outline-none focus:ring-2 focus:ring-emerald-400"
+          placeholder="curl -X POST 'http://localhost:8080/users/42' -H 'Content-Type: application/json' -d '{&quot;name&quot;:&quot;alice&quot;}'"></textarea>
+      </div>
+      <div class="px-6 py-4 border-t border-slate-200 flex justify-end gap-2 sticky bottom-0 bg-white">
+        <button @click="closeImport()"
+          class="px-4 py-2 text-sm rounded-md border border-slate-300 hover:bg-slate-50">取消</button>
+        <button @click="doImport()"
+          class="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-md hover:bg-emerald-700">解析并新建</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 导出 curl 弹窗 -->
+  <div x-show="exportOpen" x-cloak class="fixed inset-0 z-20 flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/40" @click="closeExport()"></div>
+    <div class="relative bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+         @keydown.escape.window="closeExport()">
+      <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white">
+        <h2 class="font-bold text-slate-900">导出 curl — <span class="mono font-normal" x-text="exportItem?.name"></span></h2>
+        <button @click="closeExport()" class="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+      </div>
+      <div class="px-6 py-5 space-y-3">
+        <p class="text-xs text-slate-500">调用该 mock 接口的 curl 命令，可直接在终端运行验证。</p>
+        <textarea x-model="exportText" rows="6" readonly
+          class="w-full px-3 py-2 text-sm border border-slate-300 rounded-md mono outline-none bg-slate-50"></textarea>
+      </div>
+      <div class="px-6 py-4 border-t border-slate-200 flex justify-end gap-2 sticky bottom-0 bg-white">
+        <button @click="copyExport()"
+          class="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-md hover:bg-emerald-700">复制</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function emptyForm() {
+      return {
+        id: '', name: '', method: 'GET', path: '', description: '',
+        status: 200, delay: 0, enabled: true,
+        headers: [], body: '',
+      };
+    }
+
+    // 将 curl 字符串解析为 { method, path }。支持 -X / -H / -d 与续行。
+    function parseCurl(raw) {
+      if (!raw || !raw.trim()) throw new Error('内容为空');
+      // 合并行尾反斜杠续行
+      let text = raw.replace(/\\\r?\n/g, ' ').trim();
+      // 去掉开头的 curl
+      const head = text.match(/^curl\s+([\s\S]*)$/i);
+      if (!head) throw new Error('未以 curl 开头');
+      const tokens = tokenizeShell(text.slice(head.index + 4).trim());
+
+      let method = 'GET';
+      let url = '';
+      const headers = [];
+      let body = '';
+      for (let i = 0; i < tokens.length; i++) {
+        const t = tokens[i];
+        if (t === '-X' || t === '--request') {
+          method = (tokens[++i] || '').toUpperCase();
+        } else if (t === '-H' || t === '--header') {
+          headers.push(tokens[++i] || '');
+        } else if (t === '-d' || t === '--data' || t === '--data-raw' || t === '--data-binary' || t === '--data-ascii') {
+          body = tokens[++i] || '';
+          if (method === 'GET') method = 'POST'; // 有 -d 默认 POST
+        } else if (t.startsWith('-')) {
+          // 未识别的 flag，忽略其值（若下一个不是 flag）
+          continue;
+        } else if (!url) {
+          url = t;
+        }
+      }
+      if (!url) throw new Error('未找到 URL');
+
+      // 从 URL 提取 pathname 作为 mock 路径
+      let path;
+      try {
+        const u = new URL(url, location.origin);
+        path = u.pathname;
+      } catch {
+        // URL 解析失败时退回原始字符串并去掉协议/主机
+        path = url.replace(/^\w+:\/\//, '').replace(/^[^/]+/, '');
+        if (!path.startsWith('/')) path = '/' + path;
+      }
+      if (!path || path === '/') path = url;
+      return { method, path, headers, body };
+    }
+
+    // 简易 shell tokenizer：按空白切分，保留单/双引号内完整内容。
+    function tokenizeShell(s) {
+      const out = [];
+      let cur = '';
+      let quote = '';
+      for (let i = 0; i < s.length; i++) {
+        const ch = s[i];
+        if (quote) {
+          if (ch === quote) {
+            quote = '';
+          } else if (quote === '"' && ch === '\\') {
+            // 双引号内转义：保留下一字符字面量
+            cur += s[i + 1] || '';
+            i++;
+          } else {
+            cur += ch;
+          }
+        } else if (ch === "'" || ch === '"') {
+          quote = ch;
+        } else if (/\s/.test(ch)) {
+          if (cur) { out.push(cur); cur = ''; }
+        } else {
+          cur += ch;
+        }
+      }
+      if (cur) out.push(cur);
+      return out;
+    }
+
+    // 将一条 mock 生成为可调用的 curl 命令。
+    function mockToCurl(item) {
+      const method = item.method || 'GET';
+      const path = item.path || '/';
+      const url = location.origin + path;
+      let cmd = 'curl';
+      if (method !== 'GET') cmd += ' -X ' + method;
+      cmd += " '" + url + "'";
+      return cmd;
+    }
+
+    function app() {
+      return {
+        methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'],
+        list: [],
+        loading: false,
+        query: '',
+        methodFilter: '',
+
+        modalOpen: false,
+        helpOpen: false,
+        form: emptyForm(),
+
+        testOpen: false,
+        testItem: null,
+        testPath: '',
+        testBody: '',
+        testStatus: 0,
+        testResult: '',
+
+        importOpen: false,
+        importText: '',
+
+        exportOpen: false,
+        exportItem: null,
+        exportText: '',
+
+        async load() {
+          this.loading = true;
+          const params = new URLSearchParams();
+          if (this.query) params.set('q', this.query);
+          if (this.methodFilter) params.set('method', this.methodFilter);
+          try {
+            const res = await fetch('/api/mocks?' + params.toString());
+            const json = await res.json();
+            this.list = json.data || [];
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        openCreate() {
+          this.form = emptyForm();
+          this.helpOpen = false;
+          this.modalOpen = true;
+        },
+
+        openImport() {
+          this.importText = '';
+          this.importOpen = true;
+        },
+        closeImport() { this.importOpen = false; },
+
+        doImport() {
+          let parsed;
+          try {
+            parsed = parseCurl(this.importText);
+          } catch (e) {
+            alert('解析失败：' + e.message);
+            return;
+          }
+          this.form = emptyForm();
+          this.form.method = parsed.method;
+          this.form.path = parsed.path;
+          // 名称默认用「METHOD path」，方便识别
+          this.form.name = parsed.method + ' ' + parsed.path;
+          this.helpOpen = false;
+          this.importOpen = false;
+          this.modalOpen = true;
+        },
+
+        openExport(item) {
+          this.exportItem = item;
+          this.exportText = mockToCurl(item);
+          this.exportOpen = true;
+        },
+        closeExport() { this.exportOpen = false; },
+
+        async copyExport() {
+          try {
+            await navigator.clipboard.writeText(this.exportText);
+            alert('已复制到剪贴板');
+          } catch {
+            alert('复制失败，请手动选择文本复制');
+          }
+        },
+
+        openEdit(item) {
+          this.form = {
+            id: item.id, name: item.name, method: item.method, path: item.path,
+            description: item.description, status: item.status || 200,
+            delay: item.delay || 0, enabled: item.enabled,
+            headers: Object.entries(item.headers || {}).map(([k, v]) => ({ key: k, value: v })),
+            body: item.body || '',
+          };
+          this.helpOpen = false;
+          this.modalOpen = true;
+        },
+
+        closeModal() { this.modalOpen = false; },
+
+        async save() {
+          if (!this.form.name.trim() || !this.form.path.trim()) {
+            alert('请填写名称和路径');
+            return;
+          }
+          const headers = {};
+          for (const h of this.form.headers) {
+            if (h.key.trim()) headers[h.key.trim()] = h.value;
+          }
+          const payload = {
+            name: this.form.name,
+            method: this.form.method,
+            path: this.form.path,
+            description: this.form.description,
+            status: Number(this.form.status) || 200,
+            delay: Number(this.form.delay) || 0,
+            enabled: this.form.enabled,
+            headers,
+            body: this.form.body,
+          };
+          const url = this.form.id ? '/api/mocks/' + this.form.id : '/api/mocks';
+          const method = this.form.id ? 'PUT' : 'POST';
+          const res = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          if (!res.ok) {
+            const e = await res.json().catch(() => ({}));
+            alert('保存失败：' + (e.error || res.status));
+            return;
+          }
+          this.modalOpen = false;
+          await this.load();
+        },
+
+        async remove(item) {
+          if (!confirm('确定删除「' + item.name + '」？')) return;
+          const res = await fetch('/api/mocks/' + item.id, { method: 'DELETE' });
+          if (res.ok) await this.load();
+        },
+
+        async toggleEnabled(item) {
+          await fetch('/api/mocks/' + item.id, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...item, headers: item.headers || {} }),
+          });
+          await this.load();
+        },
+
+        openTest(item) {
+          this.testItem = item;
+          this.testPath = item.path;
+          this.testBody = '';
+          this.testStatus = 0;
+          this.testResult = '';
+          this.testOpen = true;
+        },
+
+        async runTest() {
+          if (!this.testItem) return;
+          const opts = { method: this.testItem.method };
+          if (['POST', 'PUT', 'PATCH'].includes(this.testItem.method) && this.testBody.trim()) {
+            opts.headers = { 'Content-Type': 'application/json' };
+            opts.body = this.testBody;
+          }
+          try {
+            const res = await fetch(this.testPath, opts);
+            this.testStatus = res.status;
+            const text = await res.text();
+            try {
+              this.testResult = JSON.stringify(JSON.parse(text), null, 2);
+            } catch {
+              this.testResult = text;
+            }
+          } catch (e) {
+            this.testStatus = 0;
+            this.testResult = '请求失败：' + e.message;
+          }
+        },
+
+        methodClass(m) {
+          const map = {
+            GET: 'bg-blue-100 text-blue-700',
+            POST: 'bg-emerald-100 text-emerald-700',
+            PUT: 'bg-amber-100 text-amber-700',
+            DELETE: 'bg-red-100 text-red-700',
+            PATCH: 'bg-purple-100 text-purple-700',
+            HEAD: 'bg-slate-200 text-slate-700',
+            OPTIONS: 'bg-slate-200 text-slate-700',
+          };
+          return map[m] || 'bg-slate-100 text-slate-600';
+        },
+
+        testStatusClass() {
+          if (this.testStatus >= 200 && this.testStatus < 300) return 'text-emerald-600';
+          if (this.testStatus >= 400) return 'text-red-600';
+          return 'text-amber-600';
+        },
+      };
+    }
+  </script>
+</body>
+</html>
