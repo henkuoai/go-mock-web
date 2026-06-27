@@ -1,0 +1,11 @@
+# 运行时生成的数据
+data/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# 构建产物
+/go-mock-web
+/exe

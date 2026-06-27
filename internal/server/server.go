@@ -2,7 +2,6 @@
 package server
 
 import (
-	"net/http"
 	"path/filepath"
 
 	"github.com/gin-gonic/gin"
@@ -26,14 +25,25 @@ func (s *Server) Engine() *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
 
-	// 管理 API
-	api := r.Group("/api/mocks")
+	// 项目管理 API
+	projects := r.Group("/api/projects")
 	{
-		api.GET("", s.listMocks)
-		api.POST("", s.createMock)
-		api.GET("/:id", s.getMock)
-		api.PUT("/:id", s.updateMock)
-		api.DELETE("/:id", s.deleteMock)
+		projects.GET("", s.listProjects)
+		projects.POST("", s.createProject)
+		projects.GET("/:id", s.getProject)
+		projects.PUT("/:id", s.updateProject)
+		projects.DELETE("/:id", s.deleteProject)
+		projects.POST("/:id/import", s.importSwagger)
+	}
+
+	// Mock 管理 API
+	mocks := r.Group("/api/mocks")
+	{
+		mocks.GET("", s.listMocks)
+		mocks.POST("", s.createMock)
+		mocks.GET("/:id", s.getMock)
+		mocks.PUT("/:id", s.updateMock)
+		mocks.DELETE("/:id", s.deleteMock)
 	}
 
 	// 首页即管理 UI
@@ -53,6 +63,3 @@ func (s *Server) serveIndex(c *gin.Context) {
 func errorJSON(c *gin.Context, status int, msg string) {
 	c.JSON(status, gin.H{"error": msg})
 }
-
-// 防止 http 包未引用告警（保留以便未来扩展）。
-var _ = http.StatusOK

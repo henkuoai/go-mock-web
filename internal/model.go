@@ -30,9 +30,40 @@ var ValidMethods = map[string]bool{
 	MethodOptions: true,
 }
 
+// Project 是一组 Mock 接口的容器。
+type Project struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+// Validate 校验项目字段是否合法。
+func (p *Project) Validate() error {
+	if strings.TrimSpace(p.Name) == "" {
+		return errors.New("project name is required")
+	}
+	return nil
+}
+
+// FillDefaults 在新建项目时填充 ID 与时间戳。
+func (p *Project) FillDefaults() {
+	p.ID = newID()
+	now := time.Now()
+	p.CreatedAt = now
+	p.UpdatedAt = now
+}
+
+// NormalizeBeforeUpdate 在更新前归一化时间戳。
+func (p *Project) NormalizeBeforeUpdate() {
+	p.UpdatedAt = time.Now()
+}
+
 // Mock 描述一条 mock 接口的完整定义。
 type Mock struct {
 	ID          string            `json:"id"`
+	ProjectID   string            `json:"projectId"`
 	Name        string            `json:"name"`
 	Method      string            `json:"method"`
 	Path        string            `json:"path"`

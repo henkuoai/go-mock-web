@@ -2,7 +2,6 @@ package server
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -12,15 +11,11 @@ import (
 )
 
 // dispatchMock 是 NoRoute 兜底处理器：匹配已启用的 mock 并返回其响应。
-// 保留前缀 /api/ 永不当作 mock 处理，避免误吞管理接口。
+// Gin 只在没有任何已注册路由匹配时才进入 NoRoute，因此管理接口（已注册）
+// 不会被这里处理；无需对 /api/ 前缀做特殊拦截。
 func (s *Server) dispatchMock(c *gin.Context) {
 	path := c.Request.URL.Path
 	method := c.Request.Method
-
-	if strings.HasPrefix(path, "/api/") {
-		errorJSON(c, http.StatusNotFound, "api not found")
-		return
-	}
 
 	mocks := s.store.AllEnabled()
 	hit := internal.MatchMock(mocks, method, path)
@@ -62,6 +57,3 @@ func (s *Server) dispatchMock(c *gin.Context) {
 		_ = err
 	}
 }
-
-// 保留以避免未使用导入告警（strconv 用于未来扩展按字符串配置延迟等）。
-var _ = strconv.Atoi

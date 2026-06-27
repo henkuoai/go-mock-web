@@ -11,7 +11,7 @@ import (
 
 const (
 	defaultAddr = ":8080"
-	dataFile    = "data/mocks.json"
+	dataFile    = "data/store.json"
 	webDir      = "web"
 )
 
